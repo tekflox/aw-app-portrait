@@ -5,7 +5,7 @@ A living AI photo frame for a wall-mounted tablet. It watches for a good portrai
 ## Product flow
 
 1. **Frame** rotates through images tagged `portrait:generated` or `portrait:display-ready`.
-2. **Camera** uses the tablet's front camera. Capture stays in-browser until one face has acceptable size, light, and contrast.
+2. **Camera** stays active while the app is open. A local frame-difference detector notices movement; MediaPipe then confirms exactly one face and checks size, light, and contrast before an automatic capture. A manual shutter remains available.
 3. **People** lets an administrator name a captured face and describe relationships such as siblings, friends, parents, or teammates.
 4. **Create** selects people, adds a free-form scene instruction, generates an image from their reference portraits, and files the result back into the gallery.
 
@@ -19,7 +19,7 @@ Gallery tags are deliberately namespaced:
 
 This is a Tier-1 app inherited from `aw-app-template`. The React UI is served from the app's own HTTPS subdomain, so a tablet can load it directly and use `getUserMedia`. The Python sub-app owns only metadata (people, descriptor samples, relationships, generation history); image bytes remain in the shared Agents Platform gallery.
 
-Face screening and the small appearance descriptor run locally in the browser. The descriptor is a lightweight MVP aid, not biometric-grade recognition. The UI always leaves unknown matches for human naming. Production face recognition should replace this module with a consented, audited embedding model before unattended identification is trusted.
+Motion detection, MediaPipe face screening, and the small appearance descriptor run locally in the browser without an LLM. Each accepted descriptor is stored against its gallery image; naming an unknown image teaches subsequent matching. The descriptor is a lightweight MVP aid, not biometric-grade recognition. Production face recognition should replace this module with a consented, audited embedding model before unattended identification is trusted.
 
 ## Configuration
 

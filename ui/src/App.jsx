@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FaceDetector as VisionFaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
 
 const API = 'api';
 const api = async (path, init) => {
@@ -17,6 +18,7 @@ function useCamera(enabled) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const [state, setState] = useState({ ready: false, error: '' });
+  const [requestVersion, requestCamera] = useState(0);
   useEffect(() => {
     let cancelled = false;
     if (!enabled) return undefined;
@@ -34,8 +36,8 @@ function useCamera(enabled) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     };
-  }, [enabled]);
-  return { videoRef, ...state };
+  }, [enabled, requestVersion]);
+  return { videoRef, requestCamera: () => requestCamera((value) => value + 1), ...state };
 }
 
 function descriptorFrom(canvas, box) {
@@ -50,15 +52,39 @@ function descriptorFrom(canvas, box) {
   return values.map((value) => Number((value - mean).toFixed(4)));
 }
 
+function useFaceDetector() {
+  const [detector, setDetector] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let disposed = false;
+    FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm')
+      .then((vision) => VisionFaceDetector.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite' },
+        runningMode: 'VIDEO', minDetectionConfidence: .68,
+      }))
+      .then((instance) => { if (disposed) instance.close(); else setDetector(instance); })
+      .catch((reason) => !disposed && setError(reason.message));
+    return () => { disposed = true; };
+  }, []);
+  return { detector, detectorError: error };
+}
+
 function CameraView({ interval, onCaptured, toast }) {
-  const { videoRef, ready, error } = useCamera(true);
+  const { videoRef, ready, error, requestCamera } = useCamera(true);
+  const { detector, detectorError } = useFaceDetector();
   const canvasRef = useRef(null);
+  const motionCanvasRef = useRef(null);
   const busy = useRef(false);
+  const previousMotionFrame = useRef(null);
+  const motionActiveUntil = useRef(0);
+  const lastCaptureAt = useRef(0);
   const [paused, setPaused] = useState(false);
   const [signal, setSignal] = useState('Procurando um rosto…');
+  const [motion, setMotion] = useState(false);
 
-  const take = useCallback(async () => {
+  const take = useCallback(async (manual = false) => {
     if (!ready || paused || busy.current || !videoRef.current?.videoWidth) return;
+    if (!manual && (Date.now() > motionActiveUntil.current || Date.now() - lastCaptureAt.current < Math.max(3, interval) * 1000)) return;
     busy.current = true;
     try {
       const video = videoRef.current;
@@ -66,12 +92,11 @@ function CameraView({ interval, onCaptured, toast }) {
       canvas.width = video.videoWidth; canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(video, 0, 0);
-      let box = { x: canvas.width * .28, y: canvas.height * .12, width: canvas.width * .44, height: canvas.height * .72 };
-      if ('FaceDetector' in window) {
-        const faces = await new window.FaceDetector({ fastMode: false, maxDetectedFaces: 2 }).detect(canvas);
-        if (faces.length !== 1) { setSignal(faces.length ? 'Uma pessoa de cada vez' : 'Chegue um pouco mais perto'); return; }
-        box = faces[0].boundingBox;
-      }
+      if (!detector) { setSignal(detectorError ? 'Detector visual indisponível' : 'Preparando visão computacional…'); return; }
+      const faces = detector.detectForVideo(video, performance.now()).detections || [];
+      if (faces.length !== 1) { setSignal(faces.length ? 'Uma pessoa de cada vez' : 'Chegue um pouco mais perto'); return; }
+      const detectedBox = faces[0].boundingBox;
+      const box = { x: detectedBox.originX, y: detectedBox.originY, width: detectedBox.width, height: detectedBox.height };
       const coverage = (box.width * box.height) / (canvas.width * canvas.height);
       const image = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       let sum = 0, sum2 = 0, n = 0;
@@ -86,21 +111,55 @@ function CameraView({ interval, onCaptured, toast }) {
       form.append('descriptor_json', JSON.stringify(descriptorFrom(canvas, box)));
       form.append('quality', String(quality));
       const result = await api('/captures', { method: 'POST', body: form });
+      lastCaptureAt.current = Date.now();
       onCaptured(result);
       setSignal(result.person ? `Oi, ${result.person.name}!` : 'Pessoa nova encontrada');
     } catch (e) { toast(e.message); setSignal('Não consegui salvar — vou tentar novamente'); }
     finally { busy.current = false; }
-  }, [ready, paused, videoRef, onCaptured, toast]);
+  }, [ready, paused, videoRef, onCaptured, toast, interval, detector, detectorError]);
 
-  useEffect(() => { const id = setInterval(take, Math.max(3, interval) * 1000); return () => clearInterval(id); }, [take, interval]);
+  // A tiny frame-difference detector keeps all motion analysis on the tablet.
+  // Motion only opens a five-second capture window; face + quality checks still
+  // decide whether anything is uploaded.
+  useEffect(() => {
+    const detectMotion = () => {
+      const video = videoRef.current;
+      if (!ready || paused || !video?.videoWidth) return;
+      const canvas = motionCanvasRef.current;
+      canvas.width = 40; canvas.height = 30;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, 40, 30);
+      const rgba = ctx.getImageData(0, 0, 40, 30).data;
+      const frame = new Uint8Array(1200);
+      let changed = 0;
+      for (let pixel = 0, offset = 0; pixel < frame.length; pixel += 1, offset += 4) {
+        frame[pixel] = (rgba[offset] * .299 + rgba[offset + 1] * .587 + rgba[offset + 2] * .114) | 0;
+        if (previousMotionFrame.current && Math.abs(frame[pixel] - previousMotionFrame.current[pixel]) > 22) changed += 1;
+      }
+      previousMotionFrame.current = frame;
+      const detected = changed / frame.length > .045;
+      if (detected) {
+        motionActiveUntil.current = Date.now() + 5000;
+        setMotion(true);
+        setSignal('Movimento detectado — procurando um rosto');
+      } else if (Date.now() > motionActiveUntil.current) {
+        setMotion(false);
+      }
+    };
+    const id = setInterval(detectMotion, 650);
+    return () => clearInterval(id);
+  }, [ready, paused, videoRef]);
+
+  useEffect(() => { const id = setInterval(() => take(false), 1200); return () => clearInterval(id); }, [take]);
   return <section className="cameraStage">
     <video ref={videoRef} playsInline muted />
     <canvas ref={canvasRef} hidden />
+    <canvas ref={motionCanvasRef} hidden />
     <div className="cameraShade" />
     <div className="focusOval" />
-    <div className="cameraTop"><span className={`liveDot ${ready ? '' : 'off'}`} /> {ready ? 'CÂMERA ATIVA' : 'CÂMERA'}</div>
-    <div className="cameraMessage"><strong>{error ? 'Permita o acesso à câmera' : signal}</strong><small>{error || 'As melhores fotos entram automaticamente na galeria'}</small></div>
-    <button className="pause" onClick={() => setPaused((v) => !v)}>{paused ? 'Retomar' : 'Pausar'}</button>
+    <div className="cameraTop"><span className={`liveDot ${ready ? '' : 'off'}`} /> {ready ? (motion ? 'MOVIMENTO DETECTADO' : 'OBSERVANDO O AMBIENTE') : 'CÂMERA'}</div>
+    <div className="cameraMessage"><strong>{error ? 'Precisamos liberar a câmera' : signal}</strong><small>{error ? 'Toque abaixo para o navegador mostrar a permissão.' : 'Movimento → rosto → qualidade → galeria, tudo automático'}</small>{error && <button className="permissionButton" onClick={requestCamera}>Permitir câmera</button>}</div>
+    <div className="cameraActions"><button onClick={() => take(true)} disabled={!ready}>Tirar foto agora</button><button onClick={() => setPaused((v) => !v)}>{paused ? 'Retomar automático' : 'Pausar automático'}</button></div>
   </section>;
 }
 
@@ -149,7 +208,7 @@ export default function App() {
   return <main>
     <nav><button className="brand" onClick={() => setView('frame')}><Icon>✦</Icon><span>AI Portrait<small>MEMÓRIAS VIVAS</small></span></button><div className="navTabs">{[['frame','Porta-retrato'],['camera','Câmera'],['people','Pessoas'],['create','Criar']].map(([id,label]) => <button key={id} className={view === id ? 'active' : ''} onClick={() => setView(id)}>{label}</button>)}</div><button className="settings" onClick={() => setView('people')}>⚙</button></nav>
     {view === 'frame' && <section className="frameView">{displayImages.length ? <><img src={displayImages[slide]?.url} /><div className="frameGradient" /><div className="frameCaption"><span>RETRATO DO MOMENTO</span><strong>Uma memória que nunca aconteceu.<br />Mas deveria.</strong></div><div className="dots">{displayImages.map((_, i) => <i className={i === slide ? 'on' : ''} key={i} />)}</div></> : <div className="emptyFrame"><Icon>✦</Icon><h1>Seu porta-retrato está pronto.</h1><p>Conheça algumas pessoas pela câmera e crie a primeira memória impossível.</p><button onClick={() => setView('camera')}>Abrir a câmera</button></div>}</section>}
-    {view === 'camera' && <CameraView interval={status.capture_interval_seconds} toast={toast} onCaptured={(result) => { reload(); if (!result.person) toast('Pessoa nova encontrada — abra Pessoas para dar um nome.'); }} />}
+    <div className={view === 'camera' ? '' : 'cameraBackground'}><CameraView interval={status.capture_interval_seconds} toast={toast} onCaptured={(result) => { reload(); if (!result.person) toast('Pessoa nova encontrada — abra Pessoas para dar um nome.'); }} /></div>
     {view === 'people' && <section className="workspace"><div className="sectionHead"><span className="eyebrow">GALERIA & IDENTIDADE</span><h2>As pessoas por trás das histórias</h2><p>Selecione uma captura, dê um nome e ensine relações. Nada é publicado sem sua configuração.</p></div><div className="split"><div><Gallery blocks={blocks} selected={selectedImage?.id} onSelect={setSelectedImage} /></div><PeoplePanel library={library} selectedImage={selectedImage} reload={reload} toast={toast} /></div></section>}
     {view === 'create' && <CreatePanel library={library} toast={toast} onGenerated={() => { reload(); toast('Novo retrato criado e adicionado ao porta-retrato.'); }} />}
     {notice && <div className="toast">{notice}</div>}

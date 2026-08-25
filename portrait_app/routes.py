@@ -153,6 +153,7 @@ def build_routes(config_provider: Callable[[], dict] | None = None, data_dir: Pa
             files=[("files", (photo.filename or "portrait.jpg", content, photo.content_type or "image/jpeg"))],
         )
         image_id = upload.json()["images"][0]["id"]
+        state.remember_face(image_id, descriptor)
         person, confidence = state.match(descriptor)
         tags = ["portrait:capture", "portrait:face", "portrait:reviewed"]
         if person:

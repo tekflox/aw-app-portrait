@@ -1,0 +1,8 @@
+.cameraBackground { position: fixed; width: 2px; height: 2px; left: -10px; bottom: -10px; opacity: .01; overflow: hidden; pointer-events: none; }
+.cameraBackground .cameraStage { width: 2px; height: 2px; }
+.permissionButton { display: block; margin: 18px auto 0; border: 0; background: var(--gold); color: #1a1712; padding: 13px 22px; border-radius: 30px; font-weight: 700; text-shadow: none; }
+.cameraActions { position: absolute; right: 28px; bottom: 28px; display: flex; gap: 8px; }
+.cameraActions button { border: 1px solid rgba(255,255,255,.3); background: rgba(0,0,0,.42); color: white; padding: 10px 16px; border-radius: 30px; }
+.cameraActions button:first-child { background: var(--gold); border-color: var(--gold); color: #1a1712; font-weight: 700; }
+.cameraActions button:disabled { opacity: .45; }
+@media (max-width: 600px) { .cameraActions { left: 16px; right: 16px; justify-content: center; flex-wrap: wrap; } }

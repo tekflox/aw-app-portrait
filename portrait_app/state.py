@@ -18,14 +18,14 @@ class PortraitState:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         if not self.path.exists():
-            self._write({"people": [], "relations": [], "generation_history": []})
+            self._write({"people": [], "relations": [], "generation_history": [], "face_descriptors": {}})
 
     def _read(self) -> dict:
         with self._lock:
             try:
                 return json.loads(self.path.read_text(encoding="utf-8"))
             except (FileNotFoundError, json.JSONDecodeError):
-                return {"people": [], "relations": [], "generation_history": []}
+                return {"people": [], "relations": [], "generation_history": [], "face_descriptors": {}}
 
     def _write(self, data: dict) -> None:
         with self._lock:
@@ -38,6 +38,8 @@ class PortraitState:
 
     def create_person(self, name: str, image_id: str | None = None, descriptor: list[float] | None = None) -> dict:
         data = self._read()
+        if image_id and not descriptor:
+            descriptor = data.setdefault("face_descriptors", {}).get(image_id)
         person = {
             "id": uuid.uuid4().hex,
             "name": name.strip(),
@@ -51,6 +53,20 @@ class PortraitState:
         data["people"].append(person)
         self._write(data)
         return person
+
+    def remember_face(self, image_id: str, descriptor: list[float]) -> None:
+        data = self._read()
+        descriptors = data.setdefault("face_descriptors", {})
+        descriptors[image_id] = descriptor
+        # Bound metadata growth while preserving every image attached to a
+        # named person. Old unreviewed samples are the first to go.
+        protected = {photo for person in data["people"] for photo in person.get("photo_ids", [])}
+        while len(descriptors) > 1000:
+            removable = next((key for key in descriptors if key not in protected), None)
+            if removable is None:
+                break
+            descriptors.pop(removable, None)
+        self._write(data)
 
     def update_person(self, person_id: str, changes: dict) -> dict | None:
         data = self._read()
@@ -67,6 +83,8 @@ class PortraitState:
 
     def add_sample(self, person_id: str, image_id: str, descriptor: list[float] | None) -> dict | None:
         data = self._read()
+        if not descriptor:
+            descriptor = data.setdefault("face_descriptors", {}).get(image_id)
         for person in data["people"]:
             if person["id"] != person_id:
                 continue

@@ -14,7 +14,7 @@ AI Portrait is a Tier-1 managed web app. `portrait_app/routes.py` exposes the ap
 
 ## Requirements
 
-- A capture is uploaded only after client-side face/quality screening.
+- Motion opens a short capture window; a capture is uploaded only after MediaPipe face detection and client-side quality screening.
 - All gallery tags owned by the app use `portrait:` or `person:` namespaces.
 - Unknown people require human naming; low-confidence matching never invents a name.
 - Generated images retain participant tags and `portrait:generated`.

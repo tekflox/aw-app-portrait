@@ -11,3 +11,12 @@ def test_descriptor_match_and_sample_rotation(tmp_path):
         state.add_sample(person["id"], f"photo-{index + 2}", [1.0, 0.0, 0.5])
     saved = state.snapshot()["people"][0]
     assert len(saved["descriptors"]) == 12
+
+
+def test_naming_a_gallery_face_reuses_its_saved_descriptor(tmp_path):
+    state = PortraitState(tmp_path)
+    state.remember_face("unknown-photo", [0.2, 0.4, 0.6])
+    person = state.create_person("Leo", "unknown-photo")
+    assert person["descriptors"] == [[0.2, 0.4, 0.6]]
+    matched, _ = state.match([0.2, 0.4, 0.6])
+    assert matched["name"] == "Leo"
