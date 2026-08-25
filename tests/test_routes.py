@@ -28,11 +28,11 @@ def test_people_and_relations_are_persisted(tmp_path):
     client = TestClient(build_routes(lambda: {}, tmp_path))
     ana = client.post("/api/people", json={"name": "Ana"}).json()
     leo = client.post("/api/people", json={"name": "Leo"}).json()
-    relation = client.post("/api/relations", json={"source_id": ana["id"], "target_id": leo["id"], "kind": "irmãos"})
+    relation = client.post("/api/relations", json={"source_id": ana["id"], "target_id": leo["id"], "kind": "siblings"})
     assert relation.status_code == 200
     library = client.get("/api/library").json()
     assert [person["name"] for person in library["people"]] == ["Ana", "Leo"]
-    assert library["relations"][0]["kind"] == "irmãos"
+    assert library["relations"][0]["kind"] == "siblings"
 
 
 def test_gallery_actions_require_configuration(tmp_path):

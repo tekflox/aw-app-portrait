@@ -79,7 +79,7 @@ function CameraView({ interval, onCaptured, toast }) {
   const motionActiveUntil = useRef(0);
   const lastCaptureAt = useRef(0);
   const [paused, setPaused] = useState(false);
-  const [signal, setSignal] = useState('Procurando um rosto…');
+  const [signal, setSignal] = useState('Looking for a face…');
   const [motion, setMotion] = useState(false);
 
   const take = useCallback(async (manual = false) => {
@@ -92,9 +92,9 @@ function CameraView({ interval, onCaptured, toast }) {
       canvas.width = video.videoWidth; canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(video, 0, 0);
-      if (!detector) { setSignal(detectorError ? 'Detector visual indisponível' : 'Preparando visão computacional…'); return; }
+      if (!detector) { setSignal(detectorError ? 'Vision detector unavailable' : 'Preparing computer vision…'); return; }
       const faces = detector.detectForVideo(video, performance.now()).detections || [];
-      if (faces.length !== 1) { setSignal(faces.length ? 'Uma pessoa de cada vez' : 'Chegue um pouco mais perto'); return; }
+      if (faces.length !== 1) { setSignal(faces.length ? 'One person at a time' : 'Come a little closer'); return; }
       const detectedBox = faces[0].boundingBox;
       const box = { x: detectedBox.originX, y: detectedBox.originY, width: detectedBox.width, height: detectedBox.height };
       const coverage = (box.width * box.height) / (canvas.width * canvas.height);
@@ -103,8 +103,8 @@ function CameraView({ interval, onCaptured, toast }) {
       for (let i = 0; i < image.length; i += 64) { const y = image[i] * .299 + image[i + 1] * .587 + image[i + 2] * .114; sum += y; sum2 += y * y; n += 1; }
       const brightness = sum / n, contrast = Math.sqrt(Math.max(0, sum2 / n - brightness * brightness));
       const quality = Math.min(1, coverage * 3.2) * Math.min(1, contrast / 42) * (brightness > 40 && brightness < 225 ? 1 : .5);
-      if (quality < .42) { setSignal(brightness < 40 ? 'Está escuro — procure mais luz' : 'Fique parado e mais perto'); return; }
-      setSignal('Ótimo — guardando este momento');
+      if (quality < .42) { setSignal(brightness < 40 ? 'It is too dark — find more light' : 'Stay still and come closer'); return; }
+      setSignal('Great — saving this moment');
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', .9));
       const form = new FormData();
       form.append('photo', blob, `portrait-${Date.now()}.jpg`);
@@ -113,8 +113,8 @@ function CameraView({ interval, onCaptured, toast }) {
       const result = await api('/captures', { method: 'POST', body: form });
       lastCaptureAt.current = Date.now();
       onCaptured(result);
-      setSignal(result.person ? `Oi, ${result.person.name}!` : 'Pessoa nova encontrada');
-    } catch (e) { toast(e.message); setSignal('Não consegui salvar — vou tentar novamente'); }
+      setSignal(result.person ? `Hi, ${result.person.name}!` : 'New person found');
+    } catch (e) { toast(e.message); setSignal('Could not save it — I will try again'); }
     finally { busy.current = false; }
   }, [ready, paused, videoRef, onCaptured, toast, interval, detector, detectorError]);
 
@@ -141,7 +141,7 @@ function CameraView({ interval, onCaptured, toast }) {
       if (detected) {
         motionActiveUntil.current = Date.now() + 5000;
         setMotion(true);
-        setSignal('Movimento detectado — procurando um rosto');
+        setSignal('Motion detected — looking for a face');
       } else if (Date.now() > motionActiveUntil.current) {
         setMotion(false);
       }
@@ -157,16 +157,16 @@ function CameraView({ interval, onCaptured, toast }) {
     <canvas ref={motionCanvasRef} hidden />
     <div className="cameraShade" />
     <div className="focusOval" />
-    <div className="cameraTop"><span className={`liveDot ${ready ? '' : 'off'}`} /> {ready ? (motion ? 'MOVIMENTO DETECTADO' : 'OBSERVANDO O AMBIENTE') : 'CÂMERA'}</div>
-    <div className="cameraMessage"><strong>{error ? 'Precisamos liberar a câmera' : signal}</strong><small>{error ? 'Toque abaixo para o navegador mostrar a permissão.' : 'Movimento → rosto → qualidade → galeria, tudo automático'}</small>{error && <button className="permissionButton" onClick={requestCamera}>Permitir câmera</button>}</div>
-    <div className="cameraActions"><button onClick={() => take(true)} disabled={!ready}>Tirar foto agora</button><button onClick={() => setPaused((v) => !v)}>{paused ? 'Retomar automático' : 'Pausar automático'}</button></div>
+    <div className="cameraTop"><span className={`liveDot ${ready ? '' : 'off'}`} /> {ready ? (motion ? 'MOTION DETECTED' : 'WATCHING THE ROOM') : 'CAMERA'}</div>
+    <div className="cameraMessage"><strong>{error ? 'Camera access is required' : signal}</strong><small>{error ? 'Tap below to open the browser permission prompt.' : 'Motion → face → quality → gallery, fully automatic'}</small>{error && <button className="permissionButton" onClick={requestCamera}>Allow camera</button>}</div>
+    <div className="cameraActions"><button onClick={() => take(true)} disabled={!ready}>Take a photo now</button><button onClick={() => setPaused((v) => !v)}>{paused ? 'Resume automatic capture' : 'Pause automatic capture'}</button></div>
   </section>;
 }
 
 function Gallery({ blocks, onSelect, selected }) {
   const images = blocks.flatMap((block) => block.images.map((image) => ({ ...image, source: block.source })));
   return <div className="galleryGrid">{images.map((image) => <button key={image.id} className={`photoCard ${selected === image.id ? 'selected' : ''}`} onClick={() => onSelect(image)}>
-    <img src={image.url} alt="Retrato" loading="lazy" />
+    <img src={image.url} alt="Portrait" loading="lazy" />
     <span className="chips">{image.tags?.slice(0, 2).map((tag) => <em key={tag.id}>{tag.name.replace('portrait:', '')}</em>)}</span>
   </button>)}</div>;
 }
@@ -177,9 +177,9 @@ function PeoplePanel({ library, selectedImage, reload, toast }) {
   const create = async () => { if (!name.trim()) return; try { await api('/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, image_id: selectedImage?.id }) }); setName(''); reload(); } catch (e) { toast(e.message); } };
   const link = async () => { try { await api('/relations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(relation) }); setRelation({ source_id: '', target_id: '', kind: '' }); reload(); } catch (e) { toast(e.message); } };
   return <div className="peoplePanel">
-    <div className="panelCard"><h3>Quem é essa pessoa?</h3><p>{selectedImage ? 'Dê um nome ao rosto selecionado.' : 'Selecione uma foto nova na galeria.'}</p><div className="inline"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome da pessoa" /><button onClick={create} disabled={!selectedImage}>Salvar</button></div></div>
-    <div className="peopleList">{library.people.map((person) => <div className="person" key={person.id}><div className="avatar">{person.photo_ids[0] ? <img src={`api/media/${person.photo_ids[0]}`} /> : person.name[0]}</div><div><strong>{person.name}</strong><small>{person.photo_ids.length} retrato(s)</small></div></div>)}</div>
-    <div className="panelCard"><h3>Como eles se conhecem?</h3><div className="relationForm"><select value={relation.source_id} onChange={(e) => setRelation({ ...relation, source_id: e.target.value })}><option value="">Pessoa 1</option>{library.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><input value={relation.kind} onChange={(e) => setRelation({ ...relation, kind: e.target.value })} placeholder="ex.: irmãos, amigos" /><select value={relation.target_id} onChange={(e) => setRelation({ ...relation, target_id: e.target.value })}><option value="">Pessoa 2</option>{library.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><button onClick={link}>Criar relação</button></div></div>
+    <div className="panelCard"><h3>Who is this person?</h3><p>{selectedImage ? 'Name the selected face.' : 'Select a new photo from the gallery.'}</p><div className="inline"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Person's name" /><button onClick={create} disabled={!selectedImage}>Save</button></div></div>
+    <div className="peopleList">{library.people.map((person) => <div className="person" key={person.id}><div className="avatar">{person.photo_ids[0] ? <img src={`api/media/${person.photo_ids[0]}`} /> : person.name[0]}</div><div><strong>{person.name}</strong><small>{person.photo_ids.length} portrait(s)</small></div></div>)}</div>
+    <div className="panelCard"><h3>How do they know each other?</h3><div className="relationForm"><select value={relation.source_id} onChange={(e) => setRelation({ ...relation, source_id: e.target.value })}><option value="">Person 1</option>{library.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><input value={relation.kind} onChange={(e) => setRelation({ ...relation, kind: e.target.value })} placeholder="e.g. siblings, friends" /><select value={relation.target_id} onChange={(e) => setRelation({ ...relation, target_id: e.target.value })}><option value="">Person 2</option>{library.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><button onClick={link}>Create relationship</button></div></div>
   </div>;
 }
 
@@ -187,9 +187,9 @@ function CreatePanel({ library, onGenerated, toast }) {
   const [prompt, setPrompt] = useState('');
   const [selected, setSelected] = useState([]);
   const [busy, setBusy] = useState(false);
-  const ideas = ['num piquenique em Marte', 'como estrelas de um filme dos anos 80', 'numa aventura pirata elegante', 'celebrando juntos em um jardim mágico'];
+  const ideas = ['having a picnic on Mars', 'as stars in an eighties movie', 'on an elegant pirate adventure', 'celebrating together in a magical garden'];
   const run = async () => { setBusy(true); try { const result = await api('/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, person_ids: selected }) }); onGenerated(result); setPrompt(''); } catch (e) { toast(e.message); } finally { setBusy(false); } };
-  return <div className="createPanel"><header><span className="eyebrow">ESTÚDIO CRIATIVO</span><h2>Onde vamos levar todo mundo hoje?</h2><p>Escolha as pessoas e descreva a cena. A identidade vem dos retratos aprovados.</p></header><div className="cast">{library.people.map((person) => <button key={person.id} className={selected.includes(person.id) ? 'picked' : ''} onClick={() => setSelected((ids) => ids.includes(person.id) ? ids.filter((id) => id !== person.id) : [...ids, person.id])}><div className="avatar">{person.photo_ids[0] ? <img src={`api/media/${person.photo_ids[0]}`} /> : person.name[0]}</div>{person.name}</button>)}</div><div className="promptBox"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ex.: Frederico e Ana explorando uma cidade flutuante, luz dourada, fotografia cinematográfica…" /><div className="ideas">{ideas.map((idea) => <button key={idea} onClick={() => setPrompt(idea)}>{idea}</button>)}</div><button className="generate" disabled={busy || !prompt || !selected.length} onClick={run}>{busy ? 'Criando…' : 'Criar novo retrato ✦'}</button></div></div>;
+  return <div className="createPanel"><header><span className="eyebrow">CREATIVE STUDIO</span><h2>Where should we take everyone today?</h2><p>Choose the people and describe the scene. Identity comes from approved portraits.</p></header><div className="cast">{library.people.map((person) => <button key={person.id} className={selected.includes(person.id) ? 'picked' : ''} onClick={() => setSelected((ids) => ids.includes(person.id) ? ids.filter((id) => id !== person.id) : [...ids, person.id])}><div className="avatar">{person.photo_ids[0] ? <img src={`api/media/${person.photo_ids[0]}`} /> : person.name[0]}</div>{person.name}</button>)}</div><div className="promptBox"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Example: Fred and Ana exploring a floating city, golden light, cinematic photography…" /><div className="ideas">{ideas.map((idea) => <button key={idea} onClick={() => setPrompt(idea)}>{idea}</button>)}</div><button className="generate" disabled={busy || !prompt || !selected.length} onClick={run}>{busy ? 'Creating…' : 'Create a new portrait ✦'}</button></div></div>;
 }
 
 export default function App() {
@@ -206,11 +206,11 @@ export default function App() {
   const [slide, setSlide] = useState(0);
   useEffect(() => { const id = setInterval(() => setSlide((n) => displayImages.length ? (n + 1) % displayImages.length : 0), 18000); return () => clearInterval(id); }, [displayImages.length]);
   return <main>
-    <nav><button className="brand" onClick={() => setView('frame')}><Icon>✦</Icon><span>AI Portrait<small>MEMÓRIAS VIVAS</small></span></button><div className="navTabs">{[['frame','Porta-retrato'],['camera','Câmera'],['people','Pessoas'],['create','Criar']].map(([id,label]) => <button key={id} className={view === id ? 'active' : ''} onClick={() => setView(id)}>{label}</button>)}</div><button className="settings" onClick={() => setView('people')}>⚙</button></nav>
-    {view === 'frame' && <section className="frameView">{displayImages.length ? <><img src={displayImages[slide]?.url} /><div className="frameGradient" /><div className="frameCaption"><span>RETRATO DO MOMENTO</span><strong>Uma memória que nunca aconteceu.<br />Mas deveria.</strong></div><div className="dots">{displayImages.map((_, i) => <i className={i === slide ? 'on' : ''} key={i} />)}</div></> : <div className="emptyFrame"><Icon>✦</Icon><h1>Seu porta-retrato está pronto.</h1><p>Conheça algumas pessoas pela câmera e crie a primeira memória impossível.</p><button onClick={() => setView('camera')}>Abrir a câmera</button></div>}</section>}
-    <div className={view === 'camera' ? '' : 'cameraBackground'}><CameraView interval={status.capture_interval_seconds} toast={toast} onCaptured={(result) => { reload(); if (!result.person) toast('Pessoa nova encontrada — abra Pessoas para dar um nome.'); }} /></div>
-    {view === 'people' && <section className="workspace"><div className="sectionHead"><span className="eyebrow">GALERIA & IDENTIDADE</span><h2>As pessoas por trás das histórias</h2><p>Selecione uma captura, dê um nome e ensine relações. Nada é publicado sem sua configuração.</p></div><div className="split"><div><Gallery blocks={blocks} selected={selectedImage?.id} onSelect={setSelectedImage} /></div><PeoplePanel library={library} selectedImage={selectedImage} reload={reload} toast={toast} /></div></section>}
-    {view === 'create' && <CreatePanel library={library} toast={toast} onGenerated={() => { reload(); toast('Novo retrato criado e adicionado ao porta-retrato.'); }} />}
+    <nav><button className="brand" onClick={() => setView('frame')}><Icon>✦</Icon><span>AI Portrait<small>LIVING MEMORIES</small></span></button><div className="navTabs">{[['frame','Photo frame'],['camera','Camera'],['people','People'],['create','Create']].map(([id,label]) => <button key={id} className={view === id ? 'active' : ''} onClick={() => setView(id)}>{label}</button>)}</div><button className="settings" onClick={() => setView('people')}>⚙</button></nav>
+    {view === 'frame' && <section className="frameView">{displayImages.length ? <><img src={displayImages[slide]?.url} /><div className="frameGradient" /><div className="frameCaption"><span>PORTRAIT OF THE MOMENT</span><strong>A memory that never happened.<br />But should have.</strong></div><div className="dots">{displayImages.map((_, i) => <i className={i === slide ? 'on' : ''} key={i} />)}</div></> : <div className="emptyFrame"><Icon>✦</Icon><h1>Your photo frame is ready.</h1><p>Meet a few people through the camera and create the first impossible memory.</p><button onClick={() => setView('camera')}>Open camera</button></div>}</section>}
+    <div className={view === 'camera' ? '' : 'cameraBackground'}><CameraView interval={status.capture_interval_seconds} toast={toast} onCaptured={(result) => { reload(); if (!result.person) toast('New person found — open People to give them a name.'); }} /></div>
+    {view === 'people' && <section className="workspace"><div className="sectionHead"><span className="eyebrow">GALLERY & IDENTITY</span><h2>The people behind the stories</h2><p>Select a capture, name the person, and teach relationships. Nothing is published without your configuration.</p></div><div className="split"><div><Gallery blocks={blocks} selected={selectedImage?.id} onSelect={setSelectedImage} /></div><PeoplePanel library={library} selectedImage={selectedImage} reload={reload} toast={toast} /></div></section>}
+    {view === 'create' && <CreatePanel library={library} toast={toast} onGenerated={() => { reload(); toast('New portrait created and added to the photo frame.'); }} />}
     {notice && <div className="toast">{notice}</div>}
   </main>;
 }
