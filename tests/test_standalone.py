@@ -1,11 +1,3 @@
-"""Boot smoke test for template_app/__main__.py's standalone FastAPI app
-(ADR Decision 4/6). Doesn't require `npm run build` to have run — asserts the
-mounted API sub-app works either way; only exercises the static-file mount
-when ui/dist/ actually exists (so this passes in a fresh checkout, and gets
-stricter automatically once someone builds the UI).
-
-Run: .venv/aw/bin/python -m pytest tests/test_standalone.py
-"""
 from __future__ import annotations
 
 import sys
@@ -16,20 +8,20 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from template_app.__main__ import build_standalone_app, SLUG, UI_DIST  # noqa: E402
+from portrait_app.__main__ import SLUG, build_standalone_app  # noqa: E402
 
 
-def test_standalone_app_boots_and_mounts_api():
+def test_standalone_app_boots_and_mounts_api(tmp_path, monkeypatch):
+    monkeypatch.setenv("PORTRAIT_DATA_DIR", str(tmp_path))
     client = TestClient(build_standalone_app())
-    resp = client.get(f"/api/apps/{SLUG}/template")
-    assert resp.status_code == 200
-    assert resp.json()["message"]
+    response = client.get(f"/api/apps/{SLUG}/api/status")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
 
 
-def test_standalone_serves_ui_dist_when_built():
-    if not UI_DIST.is_dir():
-        return  # ui/ not built in this checkout — see ui/README or run `npm run build`
+def test_standalone_serves_built_react_app(tmp_path, monkeypatch):
+    monkeypatch.setenv("PORTRAIT_DATA_DIR", str(tmp_path))
     client = TestClient(build_standalone_app())
-    resp = client.get("/")
-    assert resp.status_code == 200
-    assert "text/html" in resp.headers["content-type"]
+    response = client.get(f"/api/apps/{SLUG}/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]

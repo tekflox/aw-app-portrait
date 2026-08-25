@@ -1,70 +1,68 @@
 {
   "manifest_version": 1,
-  "id": "aw-app-template",
-  "name": "App Template",
-  "version": "0.16.0",
-  "description": "TEMPLATE \u2014 the fastest way to start a new aw-workspace app. Install it and you have a working app on day one: a `template` CLI that prints a configurable greeting, its own window in the Apps grid, and an HTTP + WebSocket backend \u2014 with tests and marketplace release already wired. The scaffold names its app, CLI, route and Python package after itself, so renaming every `template` occurrence to your app's name is the whole rename; see README.md.",
+  "id": "aw-app-portrait",
+  "name": "AI Portrait",
+  "version": "0.1.0",
+  "description": "Turn a tablet into a living AI photo frame: meet the people in front of its camera, organize their portraits, and place friends and family in delightful new scenes.",
   "tier": "inprocess",
   "requires_ui_refresh": true,
   "publisher": "TekFlox",
-  "resource_estimate": {
-    "cpu": "low",
-    "memory": "low",
-    "disk": "low"
-  },
+  "resource_estimate": {"cpu": "medium", "memory": "medium", "disk": "medium"},
   "runtime": {
     "python": ">=3.11",
-    "entrypoint": "template_app.plugin:TemplateAppPlugin",
-    "pip_requires": [],
-    "standalone": {
-      "module": "template_app",
-      "default_port": 9400
-    }
+    "entrypoint": "portrait_app.plugin:PortraitAppPlugin",
+    "pip_requires": ["httpx>=0.27", "python-multipart>=0.0.9"],
+    "standalone": {"module": "portrait_app", "default_port": 9475}
   },
-  "permissions": [
-    "commands:install",
-    "fs:workspace-data",
-    "routes:register",
-    "ui:code",
-    "ui:slots:core.nav"
-  ],
+  "permissions": ["fs:workspace-data", "routes:register", "net:outbound"],
   "contributes": {
-    "system_clis": [
+    "routes": [{"prefix": "/api/apps/aw-app-portrait"}],
+    "windows": [
       {
-        "name": "template",
-        "installer": "scripts/install_template.sh",
-        "verify": "template --version"
-      }
-    ],
-    "routes": [
-      {
-        "prefix": "/api/apps/aw-app-template"
-      }
-    ],
-    "frontend": {
-      "mode": "component",
-      "bundle": "ui/dist/template.js"
-    },
-    "skills": [
-      {
-        "id": "aw-create-app",
-        "path": "skills/aw-create-app/SKILL.md",
-        "description": "How to author a decoupled aw-workspace app from this template \u2014 manifest, tiers, capabilities, contributes, backend routes (HTTP+WS), frontend code, standalone mode, window widgets, install + marketplace release."
+        "id": "aw-app-portrait.main",
+        "title": "AI Portrait",
+        "icon": "camera",
+        "body": {"type": "managed_app", "kind": "web", "path": "/"}
       }
     ]
   },
   "config_schema": {
     "type": "object",
     "properties": {
-      "greeting": {
+      "gallery_base_url": {
         "type": "string",
-        "default": "Hello",
-        "description": "Word the installed `template` command prints before the target name, e.g. \"Hello, world!\"."
-      }
+        "default": "https://agents-platform-multitenant.app.aw.tekflox.com",
+        "title": "Agents Platform URL",
+        "description": "Base URL of the Agents Platform Multitenant gallery."
+      },
+      "gallery_token": {
+        "type": "string",
+        "default": "",
+        "title": "Gallery token",
+        "description": "A valid gallery share token used to upload, browse, and tag portraits."
+      },
+      "bot_slug": {"type": "string", "default": "portrait", "title": "Gallery bot slug"},
+      "capture_interval_seconds": {
+        "type": "integer", "minimum": 3, "maximum": 300, "default": 12,
+        "title": "Capture interval (seconds)"
+      },
+      "openai_api_key": {
+        "type": "string", "default": "", "title": "OpenAI API key",
+        "description": "Optional. Enables image generation with reference portraits."
+      },
+      "image_model": {"type": "string", "default": "gpt-image-1.5", "title": "Image model"}
     },
     "required": []
   },
-  "config_visible": false,
-  "dependencies": {},
+  "config_visible": true,
+  "dependencies": {
+    "apps": [
+      {
+        "id": "agents-platform-runners",
+        "required": false,
+        "reason": "Provides the shared multitenant gallery and future agent-driven generation workflows."
+      }
+    ]
+  },
   "migrations": {}
 }
