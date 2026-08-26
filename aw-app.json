@@ -55,13 +55,7 @@
         "type": "string",
         "default": "https://agents-platform-multitenant.app.aw.tekflox.com",
         "title": "Agents Platform URL",
-        "description": "Base URL of the Agents Platform Multitenant gallery."
-      },
-      "gallery_token": {
-        "type": "string",
-        "default": "",
-        "title": "Gallery token",
-        "description": "A valid gallery share token used to upload, browse, and tag portraits."
+        "description": "Optional public URL override. Gallery access is initialized automatically through Agents Platform Runners."
       },
       "bot_slug": {
         "type": "string",
