@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Callable
 
 import httpx
+import cv2
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +18,51 @@ from .state import PortraitState
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 UI_DIST = APP_ROOT / "ui" / "dist"
+
+
+def prepare_portrait(content: bytes) -> tuple[bytes, dict]:
+    """Validate a face server-side and return a vertical, body-aware crop."""
+    frame = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(422, "The uploaded file is not a readable image")
+    height, width = frame.shape[:2]
+    if min(height, width) < 360:
+        raise HTTPException(422, "Move closer — the image is too small")
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    brightness = float(gray.mean())
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    if brightness < 35:
+        raise HTTPException(422, "The room is too dark")
+    if sharpness < 32:
+        raise HTTPException(422, "Hold still — the image is blurred")
+    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    faces = cascade.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=5, minSize=(70, 70))
+    if not len(faces):
+        raise HTTPException(422, "No clear face was found")
+    x, y, face_w, face_h = max(faces, key=lambda face: face[2] * face[3])
+    if face_w * face_h < width * height * 0.012:
+        raise HTTPException(422, "Move closer — the face is too small")
+
+    # A frontal face is the stable server-side anchor. Expand well below it to
+    # retain torso/full body when present, then fit a portrait-friendly 4:5 crop.
+    center_x = x + face_w / 2
+    crop_top = max(0, int(y - face_h * 0.9))
+    crop_bottom = min(height, int(y + face_h * 7.2))
+    crop_height = max(face_h * 3, crop_bottom - crop_top)
+    crop_width = min(width, int(crop_height * 0.8))
+    crop_width = max(crop_width, int(face_w * 3.4))
+    left = max(0, min(width - crop_width, int(center_x - crop_width / 2)))
+    right = min(width, left + crop_width)
+    portrait = frame[crop_top:crop_bottom, left:right]
+    ok, encoded = cv2.imencode(".jpg", portrait, [cv2.IMWRITE_JPEG_QUALITY, 91])
+    if not ok:
+        raise HTTPException(500, "Could not encode the portrait crop")
+    return encoded.tobytes(), {
+        "face_box": [int(x - left), int(y - crop_top), int(face_w), int(face_h)],
+        "crop_box": [int(left), int(crop_top), int(right - left), int(crop_bottom - crop_top)],
+        "brightness": round(brightness, 1),
+        "sharpness": round(sharpness, 1),
+    }
 
 
 class PersonIn(BaseModel):
@@ -140,8 +187,8 @@ def build_routes(
     @app.post("/api/people")
     async def create_person(body: PersonIn) -> dict:
         person = state.create_person(body.name, body.image_id, body.descriptor)
-        if body.image_id:
-            await tag_image(body.image_id, "portrait:face", "portrait:identified", f"person:{person['name']}")
+        for image_id in person.get("photo_ids", []):
+            await tag_image(image_id, "portrait:face", "portrait:identified", f"person:{person['name']}")
         return person
 
     @app.patch("/api/people/{person_id}")
@@ -193,21 +240,31 @@ def build_routes(
         content = await photo.read()
         if not content or len(content) > 12 * 1024 * 1024:
             raise HTTPException(400, "Photo must be between 1 byte and 12 MB")
+        cropped, analysis = prepare_portrait(content)
+        existing = state.collection_for(descriptor)
+        if len(existing["photo_ids"]) >= 10:
+            return {
+                "saved": False,
+                "collection_complete": True,
+                "person": existing["item"] if existing["kind"] == "person" else None,
+                "collection_id": existing["item"]["id"],
+                "sample_count": len(existing["photo_ids"]),
+                "photo_ids": existing["photo_ids"],
+            }
         upload = await gallery_request(
             "POST", "/upload",
-            files=[("files", (photo.filename or "portrait.jpg", content, photo.content_type or "image/jpeg"))],
+            files=[("files", (photo.filename or "portrait.jpg", cropped, "image/jpeg"))],
         )
         image_id = upload.json()["images"][0]["id"]
-        state.remember_face(image_id, descriptor)
-        person, confidence = state.match(descriptor)
-        tags = ["portrait:capture", "portrait:face", "portrait:reviewed"]
+        collection = state.register_capture(image_id, descriptor, maximum=10)
+        person, confidence = collection["person"], collection["confidence"]
+        tags = ["portrait:capture", "portrait:face", "portrait:server-approved", f"portrait:collection:{collection['collection_id']}", f"portrait:sample:{collection['sample_count']}"]
         if person:
-            state.add_sample(person["id"], image_id, descriptor)
             tags.extend(["portrait:identified", f"person:{person['name']}"])
         else:
             tags.append("portrait:unknown")
         await tag_image(image_id, *tags)
-        return {"image_id": image_id, "person": person, "confidence": confidence, "tags": tags}
+        return {"saved": True, "image_id": image_id, "person": person, "confidence": confidence, "tags": tags, "analysis": analysis, **{k: collection[k] for k in ("collection_id", "sample_count", "photo_ids")}}
 
     @app.post("/api/generate")
     async def generate(body: GenerateIn) -> dict:

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FaceDetector as VisionFaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
+import './ambient.css';
 
 const API = 'api';
 const api = async (path, init) => {
@@ -73,14 +74,12 @@ function CameraView({ interval, captureReady, captureBlocker, onCaptured, toast 
   const { videoRef, ready, error, requestCamera } = useCamera(true);
   const { detector, detectorError } = useFaceDetector();
   const canvasRef = useRef(null);
-  const motionCanvasRef = useRef(null);
   const busy = useRef(false);
-  const previousMotionFrame = useRef(null);
-  const motionActiveUntil = useRef(0);
+  const stablePresence = useRef(0);
   const lastCaptureAt = useRef(0);
   const [paused, setPaused] = useState(false);
   const [signal, setSignal] = useState('Looking for a face…');
-  const [motion, setMotion] = useState(false);
+  const [showcase, setShowcase] = useState(null);
 
   const take = useCallback(async (manual = false) => {
     if (!captureReady) {
@@ -88,7 +87,7 @@ function CameraView({ interval, captureReady, captureBlocker, onCaptured, toast 
       return;
     }
     if (!ready || paused || busy.current || !videoRef.current?.videoWidth) return;
-    if (!manual && (Date.now() > motionActiveUntil.current || Date.now() - lastCaptureAt.current < Math.max(3, interval) * 1000)) return;
+    if (!manual && Date.now() - lastCaptureAt.current < Math.max(3, interval) * 1000) return;
     busy.current = true;
     try {
       const video = videoRef.current;
@@ -98,9 +97,15 @@ function CameraView({ interval, captureReady, captureBlocker, onCaptured, toast 
       ctx.drawImage(video, 0, 0);
       if (!detector) { setSignal(detectorError ? 'Vision detector unavailable' : 'Preparing computer vision…'); return; }
       const faces = detector.detectForVideo(video, performance.now()).detections || [];
-      if (faces.length !== 1) { setSignal(faces.length ? 'One person at a time' : 'Come a little closer'); return; }
+      if (faces.length !== 1) { stablePresence.current = 0; setSignal(faces.length ? 'One person at a time' : 'Waiting quietly for someone…'); return; }
       const detectedBox = faces[0].boundingBox;
       const box = { x: detectedBox.originX, y: detectedBox.originY, width: detectedBox.width, height: detectedBox.height };
+      const points = faces[0].keypoints || [];
+      const eyeSpan = points.length >= 2 ? Math.abs(points[0].x - points[1].x) : 0;
+      const noseCentered = points.length < 3 || (points[2].x > Math.min(points[0].x, points[1].x) && points[2].x < Math.max(points[0].x, points[1].x));
+      const looking = eyeSpan > .055 && noseCentered;
+      stablePresence.current = looking ? stablePresence.current + 1 : 0;
+      if (!manual && stablePresence.current < 2) { setSignal(looking ? 'Hello — stay for a moment' : 'Look this way when you are ready'); return; }
       const coverage = (box.width * box.height) / (canvas.width * canvas.height);
       const image = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       let sum = 0, sum2 = 0, n = 0;
@@ -117,52 +122,22 @@ function CameraView({ interval, captureReady, captureBlocker, onCaptured, toast 
       const result = await api('/captures', { method: 'POST', body: form });
       lastCaptureAt.current = Date.now();
       onCaptured(result);
-      setSignal(result.person ? `Hi, ${result.person.name}!` : 'New person found');
+      if (result.photo_ids?.length) {
+        setShowcase({ name: result.person?.name || 'You', photos: result.photo_ids });
+        setTimeout(() => setShowcase(null), 9000);
+      }
+      setSignal(result.collection_complete ? 'I already have ten good moments' : result.person ? `Hi, ${result.person.name}!` : `${result.sample_count || 1} of 10 moments collected`);
     } catch (e) { toast(e.message); setSignal('Could not save it — I will try again'); }
     finally { busy.current = false; }
   }, [captureReady, captureBlocker, ready, paused, videoRef, onCaptured, toast, interval, detector, detectorError]);
-
-  // A tiny frame-difference detector keeps all motion analysis on the tablet.
-  // Motion only opens a five-second capture window; face + quality checks still
-  // decide whether anything is uploaded.
-  useEffect(() => {
-    const detectMotion = () => {
-      const video = videoRef.current;
-      if (!ready || paused || !video?.videoWidth) return;
-      const canvas = motionCanvasRef.current;
-      canvas.width = 40; canvas.height = 30;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(video, 0, 0, 40, 30);
-      const rgba = ctx.getImageData(0, 0, 40, 30).data;
-      const frame = new Uint8Array(1200);
-      let changed = 0;
-      for (let pixel = 0, offset = 0; pixel < frame.length; pixel += 1, offset += 4) {
-        frame[pixel] = (rgba[offset] * .299 + rgba[offset + 1] * .587 + rgba[offset + 2] * .114) | 0;
-        if (previousMotionFrame.current && Math.abs(frame[pixel] - previousMotionFrame.current[pixel]) > 22) changed += 1;
-      }
-      previousMotionFrame.current = frame;
-      const detected = changed / frame.length > .045;
-      if (detected) {
-        motionActiveUntil.current = Date.now() + 5000;
-        setMotion(true);
-        setSignal('Motion detected — looking for a face');
-      } else if (Date.now() > motionActiveUntil.current) {
-        setMotion(false);
-      }
-    };
-    const id = setInterval(detectMotion, 650);
-    return () => clearInterval(id);
-  }, [ready, paused, videoRef]);
 
   useEffect(() => { const id = setInterval(() => take(false), 1200); return () => clearInterval(id); }, [take]);
   return <section className="cameraStage">
     <video ref={videoRef} playsInline muted />
     <canvas ref={canvasRef} hidden />
-    <canvas ref={motionCanvasRef} hidden />
-    <div className="cameraShade" />
-    <div className="focusOval" />
-    <div className="cameraTop"><span className={`liveDot ${ready && captureReady ? '' : 'off'}`} /> {!captureReady ? 'SETUP REQUIRED' : ready ? (motion ? 'MOTION DETECTED' : 'WATCHING THE ROOM') : 'CAMERA'}</div>
-    <div className={`cameraMessage ${!captureReady ? 'captureBlocked' : ''}`}><strong>{!captureReady ? 'Photo saving is not configured' : error ? 'Camera access is required' : signal}</strong><small>{!captureReady ? (captureBlocker || 'Open the app settings and configure the gallery.') : error ? 'Tap below to open the browser permission prompt.' : 'Motion → face → quality → gallery, fully automatic'}</small>{error && captureReady && <button className="permissionButton" onClick={requestCamera}>Allow camera</button>}</div>
+    {showcase && <div className="selfShowcase"><div className="selfPhotos">{showcase.photos.slice(-10).map((id) => <img key={id} src={`api/media/${id}`} alt="A moment of you" />)}</div><strong>Hi, {showcase.name}.</strong><small>These are the moments I remember.</small></div>}
+    <div className="cameraTop"><span className={`liveDot ${ready && captureReady ? '' : 'off'}`} /> {!captureReady ? 'SETUP REQUIRED' : ready ? 'AMBIENT CAPTURE' : 'CAMERA'}</div>
+    {!showcase && <div className={`cameraMessage ${!captureReady ? 'captureBlocked' : ''}`}><strong>{!captureReady ? 'Photo saving is not configured' : error ? 'Camera access is required' : signal}</strong><small>{!captureReady ? (captureBlocker || 'Open the app settings and configure the gallery.') : error ? 'Tap below to open the browser permission prompt.' : 'Presence → server validation → person crop → private gallery'}</small>{error && captureReady && <button className="permissionButton" onClick={requestCamera}>Allow camera</button>}</div>}
     <div className="cameraActions"><button onClick={() => take(true)} disabled={!ready || !captureReady}>Take a photo now</button><button onClick={() => setPaused((v) => !v)} disabled={!captureReady}>{paused ? 'Resume automatic capture' : 'Pause automatic capture'}</button></div>
   </section>;
 }
@@ -212,7 +187,7 @@ export default function App() {
   return <main>
     <nav><button className="brand" onClick={() => setView('frame')}><Icon>✦</Icon><span>AI Portrait<small>LIVING MEMORIES</small></span></button><div className="navTabs">{[['frame','Photo frame'],['camera','Camera'],['people','People'],['create','Create']].map(([id,label]) => <button key={id} className={view === id ? 'active' : ''} onClick={() => setView(id)}>{label}</button>)}</div><button className="settings" onClick={() => setView('people')}>⚙</button></nav>
     {view === 'frame' && <section className="frameView">{displayImages.length ? <><img src={displayImages[slide]?.url} /><div className="frameGradient" /><div className="frameCaption"><span>PORTRAIT OF THE MOMENT</span><strong>A memory that never happened.<br />But should have.</strong></div><div className="dots">{displayImages.map((_, i) => <i className={i === slide ? 'on' : ''} key={i} />)}</div></> : <div className="emptyFrame"><Icon>✦</Icon><h1>Your photo frame is ready.</h1><p>Meet a few people through the camera and create the first impossible memory.</p><button onClick={() => setView('camera')}>Open camera</button></div>}</section>}
-    <div className={view === 'camera' ? '' : 'cameraBackground'}><CameraView interval={status.capture_interval_seconds} captureReady={status.capture_ready} captureBlocker={status.capture_blocker} toast={toast} onCaptured={(result) => { reload(); if (!result.person) toast('New person found — open People to give them a name.'); }} /></div>
+    <div className={view === 'camera' ? '' : 'cameraBackground'}><CameraView interval={status.capture_interval_seconds} captureReady={status.capture_ready} captureBlocker={status.capture_blocker} toast={toast} onCaptured={(result) => { reload(); if (view === 'frame' && result.photo_ids?.length) { setView('camera'); setTimeout(() => setView((current) => current === 'camera' ? 'frame' : current), 9500); } if (!result.person && result.saved) toast('New person found — open People to give them a name.'); }} /></div>
     {view === 'people' && <section className="workspace"><div className="sectionHead"><span className="eyebrow">GALLERY & IDENTITY</span><h2>The people behind the stories</h2><p>Select a capture, name the person, and teach relationships. Nothing is published without your configuration.</p></div><div className="split"><div><Gallery blocks={blocks} selected={selectedImage?.id} onSelect={setSelectedImage} /></div><PeoplePanel library={library} selectedImage={selectedImage} reload={reload} toast={toast} /></div></section>}
     {view === 'create' && <CreatePanel library={library} toast={toast} onGenerated={() => { reload(); toast('New portrait created and added to the photo frame.'); }} />}
     {notice && <div className="toast">{notice}</div>}

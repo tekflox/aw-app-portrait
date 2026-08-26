@@ -20,3 +20,17 @@ def test_naming_a_gallery_face_reuses_its_saved_descriptor(tmp_path):
     assert person["descriptors"] == [[0.2, 0.4, 0.6]]
     matched, _ = state.match([0.2, 0.4, 0.6])
     assert matched["name"] == "Leo"
+
+
+def test_unknown_collection_is_capped_and_adopted_when_named(tmp_path):
+    state = PortraitState(tmp_path)
+    descriptor = [1.0, 0.2, 0.4]
+    first = state.register_capture("photo-0", descriptor)
+    for index in range(1, 12):
+        current = state.register_capture(f"photo-{index}", descriptor)
+    assert current["collection_id"] == first["collection_id"]
+    assert current["sample_count"] == 10
+
+    person = state.create_person("Maya", "photo-4")
+    assert person["photo_ids"] == [f"photo-{index}" for index in range(10)]
+    assert state.snapshot()["unknown_clusters"] == []

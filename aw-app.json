@@ -17,7 +17,9 @@
     "entrypoint": "portrait_app.plugin:PortraitAppPlugin",
     "pip_requires": [
       "httpx>=0.27",
-      "python-multipart>=0.0.9"
+      "python-multipart>=0.0.9",
+      "opencv-python-headless>=4.10,<5",
+      "numpy>=1.26,<3"
     ],
     "standalone": {
       "module": "portrait_app",

@@ -1,0 +1,42 @@
+.selfShowcase {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  padding: 7vw;
+  text-align: center;
+  background: radial-gradient(circle at center, rgba(42, 35, 25, .86), rgba(8, 8, 7, .98));
+}
+
+.selfPhotos {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 48vh;
+  margin-bottom: 18px;
+}
+
+.selfPhotos img {
+  width: min(27vw, 300px);
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  border: 7px solid #eee9df;
+  box-shadow: 0 20px 55px rgba(0, 0, 0, .55);
+  transform: rotate(-3deg);
+}
+
+.selfPhotos img + img { margin-left: -12vw; transform: rotate(3deg) translateY(12px); }
+.selfPhotos img:nth-last-child(n+4) { display: none; }
+.selfShowcase strong { font: 600 clamp(34px, 5vw, 68px) 'Playfair Display', serif; }
+.selfShowcase small { color: #c9c1b4; font-size: 16px; }
+
+.cameraStage video { filter: saturate(.88); }
+.cameraActions { z-index: 12; }
+.cameraTop { z-index: 12; }
+
+@media (max-width: 800px) {
+  .selfPhotos img { width: min(55vw, 260px); }
+  .selfPhotos img + img { margin-left: -35vw; }
+}

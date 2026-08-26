@@ -5,7 +5,7 @@ A living AI photo frame for a wall-mounted tablet. It watches for a good portrai
 ## Product flow
 
 1. **Frame** rotates through images tagged `portrait:generated` or `portrait:display-ready`.
-2. **Camera** stays active while the app is open. A local frame-difference detector notices movement; MediaPipe then confirms exactly one face and checks size, light, and contrast before an automatic capture. A manual shutter remains available.
+2. **Camera** stays active while the app is open. MediaPipe confirms a stable person looking toward the tablet, then quietly sends a candidate frame. The server independently validates the face, light, and sharpness, creates a body-aware vertical crop, and keeps up to ten samples per identity. A manual shutter remains available.
 3. **People** lets an administrator name a captured face and describe relationships such as siblings, friends, parents, or teammates.
 4. **Create** selects people, adds a free-form scene instruction, generates an image from their reference portraits, and files the result back into the gallery.
 
@@ -19,7 +19,7 @@ Gallery tags are deliberately namespaced:
 
 This is a Tier-1 app inherited from `aw-app-template`. The React UI is served from the app's own HTTPS subdomain, so a tablet can load it directly and use `getUserMedia`. The Python sub-app owns only metadata (people, descriptor samples, relationships, generation history); image bytes remain in the shared Agents Platform gallery.
 
-Motion detection, MediaPipe face screening, and the small appearance descriptor run locally in the browser without an LLM. Each accepted descriptor is stored against its gallery image; naming an unknown image teaches subsequent matching. The descriptor is a lightweight MVP aid, not biometric-grade recognition. Production face recognition should replace this module with a consented, audited embedding model before unattended identification is trusted.
+MediaPipe presence screening and the small appearance descriptor run locally in the browser without an LLM. OpenCV performs an independent server-side face and image-quality check before anything enters the gallery. Captures are grouped into ten-sample identity collections; naming any sample adopts the whole collection. The descriptor is a lightweight MVP aid, not biometric-grade recognition. Production face recognition should replace this module with a consented, audited embedding model before unattended identification is trusted.
 
 ## Configuration
 
