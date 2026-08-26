@@ -1,2 +1,4 @@
 pytest-asyncio>=0.23  # only if your tests are async (real sockets, asyncio servers)
 python-multipart>=0.0.9  # FastAPI form/file routes are constructed during test collection
+opencv-python-headless>=4.10,<5  # server-side face, blur, and crop validation
+numpy>=1.26,<3  # OpenCV image decoding buffer
