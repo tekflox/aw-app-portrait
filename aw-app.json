@@ -94,8 +94,8 @@
     "apps": [
       {
         "id": "agents-platform-runners",
-        "required": false,
-        "reason": "Provides the shared multitenant gallery and future agent-driven generation workflows."
+        "required": true,
+        "reason": "Provides the trusted Agents Platform identity used to initialize and renew this app's gallery access automatically."
       }
     ]
   },

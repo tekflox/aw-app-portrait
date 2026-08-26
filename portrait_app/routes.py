@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 from pathlib import Path
 from typing import Callable
@@ -43,10 +44,15 @@ class GenerateIn(BaseModel):
     person_ids: list[str] = Field(default_factory=list, max_length=6)
 
 
-def build_routes(config_provider: Callable[[], dict] | None = None, data_dir: Path | None = None) -> FastAPI:
+def build_routes(
+    config_provider: Callable[[], dict] | None = None,
+    data_dir: Path | None = None,
+    platform_config_provider: Callable[[], dict] | None = None,
+) -> FastAPI:
     config_provider = config_provider or (lambda: {})
     state = PortraitState(data_dir or APP_ROOT / ".tmp" / "portrait-data")
     app = FastAPI(title="AI Portrait")
+    trusted_gallery: dict[str, str] = {}
 
     def cfg() -> dict:
         config = dict(config_provider() or {})
@@ -54,15 +60,45 @@ def build_routes(config_provider: Callable[[], dict] | None = None, data_dir: Pa
         config.setdefault("image_model", "gpt-image-1.5")
         return config
 
-    def gallery() -> tuple[str, str]:
+    async def platform_config() -> dict:
+        if not platform_config_provider:
+            return {}
+        value = platform_config_provider()
+        if inspect.isawaitable(value):
+            value = await value
+        return dict(value or {})
+
+    async def gallery() -> tuple[str, str]:
         config = cfg()
         base, token = str(config.get("gallery_base_url", "")).rstrip("/"), str(config.get("gallery_token", "")).strip()
-        if not base or not token:
-            raise HTTPException(503, "Configure the Agents Platform gallery URL and token first")
+        if base and token:
+            return base, token
+        platform = await platform_config()
+        base = str(platform.get("agents_platform_base") or base).rstrip("/")
+        identity_token = str(platform.get("agents_platform_token") or "").strip()
+        if not base or not identity_token:
+            raise HTTPException(503, "Agents Platform Runners is not connected. Configure its trusted identity first.")
+        token = trusted_gallery.get("token", "")
+        if not token:
+            try:
+                async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                    response = await client.post(
+                        f"{base}/api/admin/gallery/token",
+                        headers={"Authorization": f"Bearer {identity_token}"},
+                        json={"bot_slug": str(config.get("bot_slug") or "portrait"), "ttl_days": 365},
+                    )
+            except httpx.HTTPError as exc:
+                raise HTTPException(502, f"Could not initialize the trusted gallery: {exc}") from exc
+            if response.status_code >= 400:
+                raise HTTPException(response.status_code, f"Could not initialize the trusted gallery: {response.text[:300]}")
+            token = str(response.json().get("token") or "")
+            if not token:
+                raise HTTPException(502, "Agents Platform returned no gallery token")
+            trusted_gallery["token"] = token
         return base, token
 
     async def gallery_request(method: str, path: str, **kwargs) -> httpx.Response:
-        base, token = gallery()
+        base, token = await gallery()
         url = f"{base}/api/gallery/{token}{path}"
         try:
             async with httpx.AsyncClient(timeout=90, follow_redirects=True) as client:
@@ -80,12 +116,18 @@ def build_routes(config_provider: Callable[[], dict] | None = None, data_dir: Pa
     @app.get("/api/status")
     async def status() -> dict:
         config = cfg()
-        gallery_configured = bool(config.get("gallery_base_url") and config.get("gallery_token"))
+        capture_blocker = None
+        try:
+            await gallery()
+            gallery_configured = True
+        except HTTPException as exc:
+            gallery_configured = False
+            capture_blocker = str(exc.detail)
         return {
             "ok": True,
             "gallery_configured": gallery_configured,
             "capture_ready": gallery_configured,
-            "capture_blocker": None if gallery_configured else "Gallery token is missing. Open the app settings and configure it before capturing photos.",
+            "capture_blocker": capture_blocker,
             "generation_configured": bool(config.get("openai_api_key")),
             "capture_interval_seconds": config["capture_interval_seconds"],
             "image_model": config["image_model"],

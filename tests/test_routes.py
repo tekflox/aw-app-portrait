@@ -3,12 +3,41 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import httpx
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from portrait_app.routes import build_routes  # noqa: E402
+
+
+def test_trusted_runner_identity_initializes_gallery_automatically(tmp_path, monkeypatch):
+    from portrait_app import routes
+
+    original_client = httpx.AsyncClient
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"token": "portrait-token", "created": True})
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return original_client(*args, **kwargs)
+
+    monkeypatch.setattr(routes.httpx, "AsyncClient", client_factory)
+    app = build_routes(
+        lambda: {"gallery_base_url": "https://ap.example", "bot_slug": "portrait"},
+        tmp_path,
+        lambda: {"agents_platform_base": "https://ap.example", "agents_platform_token": "identity-jwt"},
+    )
+    response = TestClient(app).get("/api/status")
+    assert response.status_code == 200
+    assert response.json()["capture_ready"] is True
+    assert len(calls) == 1
+    assert calls[0].url.path == "/api/admin/gallery/token"
+    assert calls[0].headers["authorization"] == "Bearer identity-jwt"
 
 
 def test_status_reports_optional_integrations(tmp_path):
@@ -19,7 +48,7 @@ def test_status_reports_optional_integrations(tmp_path):
         "ok": True,
         "gallery_configured": False,
         "capture_ready": False,
-        "capture_blocker": "Gallery token is missing. Open the app settings and configure it before capturing photos.",
+        "capture_blocker": "Agents Platform Runners is not connected. Configure its trusted identity first.",
         "generation_configured": False,
         "capture_interval_seconds": 9,
         "image_model": "gpt-image-1.5",
