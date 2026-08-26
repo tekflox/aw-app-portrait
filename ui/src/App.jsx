@@ -69,7 +69,7 @@ function useFaceDetector() {
   return { detector, detectorError: error };
 }
 
-function CameraView({ interval, onCaptured, toast }) {
+function CameraView({ interval, captureReady, captureBlocker, onCaptured, toast }) {
   const { videoRef, ready, error, requestCamera } = useCamera(true);
   const { detector, detectorError } = useFaceDetector();
   const canvasRef = useRef(null);
@@ -83,6 +83,10 @@ function CameraView({ interval, onCaptured, toast }) {
   const [motion, setMotion] = useState(false);
 
   const take = useCallback(async (manual = false) => {
+    if (!captureReady) {
+      setSignal(captureBlocker || 'Photo capture is not configured');
+      return;
+    }
     if (!ready || paused || busy.current || !videoRef.current?.videoWidth) return;
     if (!manual && (Date.now() > motionActiveUntil.current || Date.now() - lastCaptureAt.current < Math.max(3, interval) * 1000)) return;
     busy.current = true;
@@ -116,7 +120,7 @@ function CameraView({ interval, onCaptured, toast }) {
       setSignal(result.person ? `Hi, ${result.person.name}!` : 'New person found');
     } catch (e) { toast(e.message); setSignal('Could not save it — I will try again'); }
     finally { busy.current = false; }
-  }, [ready, paused, videoRef, onCaptured, toast, interval, detector, detectorError]);
+  }, [captureReady, captureBlocker, ready, paused, videoRef, onCaptured, toast, interval, detector, detectorError]);
 
   // A tiny frame-difference detector keeps all motion analysis on the tablet.
   // Motion only opens a five-second capture window; face + quality checks still
@@ -157,9 +161,9 @@ function CameraView({ interval, onCaptured, toast }) {
     <canvas ref={motionCanvasRef} hidden />
     <div className="cameraShade" />
     <div className="focusOval" />
-    <div className="cameraTop"><span className={`liveDot ${ready ? '' : 'off'}`} /> {ready ? (motion ? 'MOTION DETECTED' : 'WATCHING THE ROOM') : 'CAMERA'}</div>
-    <div className="cameraMessage"><strong>{error ? 'Camera access is required' : signal}</strong><small>{error ? 'Tap below to open the browser permission prompt.' : 'Motion → face → quality → gallery, fully automatic'}</small>{error && <button className="permissionButton" onClick={requestCamera}>Allow camera</button>}</div>
-    <div className="cameraActions"><button onClick={() => take(true)} disabled={!ready}>Take a photo now</button><button onClick={() => setPaused((v) => !v)}>{paused ? 'Resume automatic capture' : 'Pause automatic capture'}</button></div>
+    <div className="cameraTop"><span className={`liveDot ${ready && captureReady ? '' : 'off'}`} /> {!captureReady ? 'SETUP REQUIRED' : ready ? (motion ? 'MOTION DETECTED' : 'WATCHING THE ROOM') : 'CAMERA'}</div>
+    <div className={`cameraMessage ${!captureReady ? 'captureBlocked' : ''}`}><strong>{!captureReady ? 'Photo saving is not configured' : error ? 'Camera access is required' : signal}</strong><small>{!captureReady ? (captureBlocker || 'Open the app settings and configure the gallery.') : error ? 'Tap below to open the browser permission prompt.' : 'Motion → face → quality → gallery, fully automatic'}</small>{error && captureReady && <button className="permissionButton" onClick={requestCamera}>Allow camera</button>}</div>
+    <div className="cameraActions"><button onClick={() => take(true)} disabled={!ready || !captureReady}>Take a photo now</button><button onClick={() => setPaused((v) => !v)} disabled={!captureReady}>{paused ? 'Resume automatic capture' : 'Pause automatic capture'}</button></div>
   </section>;
 }
 
@@ -208,7 +212,7 @@ export default function App() {
   return <main>
     <nav><button className="brand" onClick={() => setView('frame')}><Icon>✦</Icon><span>AI Portrait<small>LIVING MEMORIES</small></span></button><div className="navTabs">{[['frame','Photo frame'],['camera','Camera'],['people','People'],['create','Create']].map(([id,label]) => <button key={id} className={view === id ? 'active' : ''} onClick={() => setView(id)}>{label}</button>)}</div><button className="settings" onClick={() => setView('people')}>⚙</button></nav>
     {view === 'frame' && <section className="frameView">{displayImages.length ? <><img src={displayImages[slide]?.url} /><div className="frameGradient" /><div className="frameCaption"><span>PORTRAIT OF THE MOMENT</span><strong>A memory that never happened.<br />But should have.</strong></div><div className="dots">{displayImages.map((_, i) => <i className={i === slide ? 'on' : ''} key={i} />)}</div></> : <div className="emptyFrame"><Icon>✦</Icon><h1>Your photo frame is ready.</h1><p>Meet a few people through the camera and create the first impossible memory.</p><button onClick={() => setView('camera')}>Open camera</button></div>}</section>}
-    <div className={view === 'camera' ? '' : 'cameraBackground'}><CameraView interval={status.capture_interval_seconds} toast={toast} onCaptured={(result) => { reload(); if (!result.person) toast('New person found — open People to give them a name.'); }} /></div>
+    <div className={view === 'camera' ? '' : 'cameraBackground'}><CameraView interval={status.capture_interval_seconds} captureReady={status.capture_ready} captureBlocker={status.capture_blocker} toast={toast} onCaptured={(result) => { reload(); if (!result.person) toast('New person found — open People to give them a name.'); }} /></div>
     {view === 'people' && <section className="workspace"><div className="sectionHead"><span className="eyebrow">GALLERY & IDENTITY</span><h2>The people behind the stories</h2><p>Select a capture, name the person, and teach relationships. Nothing is published without your configuration.</p></div><div className="split"><div><Gallery blocks={blocks} selected={selectedImage?.id} onSelect={setSelectedImage} /></div><PeoplePanel library={library} selectedImage={selectedImage} reload={reload} toast={toast} /></div></section>}
     {view === 'create' && <CreatePanel library={library} toast={toast} onGenerated={() => { reload(); toast('New portrait created and added to the photo frame.'); }} />}
     {notice && <div className="toast">{notice}</div>}

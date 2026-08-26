@@ -80,9 +80,12 @@ def build_routes(config_provider: Callable[[], dict] | None = None, data_dir: Pa
     @app.get("/api/status")
     async def status() -> dict:
         config = cfg()
+        gallery_configured = bool(config.get("gallery_base_url") and config.get("gallery_token"))
         return {
             "ok": True,
-            "gallery_configured": bool(config.get("gallery_base_url") and config.get("gallery_token")),
+            "gallery_configured": gallery_configured,
+            "capture_ready": gallery_configured,
+            "capture_blocker": None if gallery_configured else "Gallery token is missing. Open the app settings and configure it before capturing photos.",
             "generation_configured": bool(config.get("openai_api_key")),
             "capture_interval_seconds": config["capture_interval_seconds"],
             "image_model": config["image_model"],

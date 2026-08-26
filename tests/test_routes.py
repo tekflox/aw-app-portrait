@@ -18,6 +18,8 @@ def test_status_reports_optional_integrations(tmp_path):
     assert response.json() == {
         "ok": True,
         "gallery_configured": False,
+        "capture_ready": False,
+        "capture_blocker": "Gallery token is missing. Open the app settings and configure it before capturing photos.",
         "generation_configured": False,
         "capture_interval_seconds": 9,
         "image_model": "gpt-image-1.5",
