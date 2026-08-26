@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FaceDetector as VisionFaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
 import './ambient.css';
+import './gallery.css';
 
 const API = 'api';
 const api = async (path, init) => {
@@ -118,6 +119,7 @@ function CameraView({ interval, captureReady, captureBlocker, onCaptured, toast 
       const form = new FormData();
       form.append('photo', blob, `portrait-${Date.now()}.jpg`);
       form.append('descriptor_json', JSON.stringify(descriptorFrom(canvas, box)));
+      form.append('face_box_json', JSON.stringify([box.x / canvas.width, box.y / canvas.height, box.width / canvas.width, box.height / canvas.height]));
       form.append('quality', String(quality));
       const result = await api('/captures', { method: 'POST', body: form });
       lastCaptureAt.current = Date.now();
@@ -142,12 +144,20 @@ function CameraView({ interval, captureReady, captureBlocker, onCaptured, toast 
   </section>;
 }
 
-function Gallery({ blocks, onSelect, selected }) {
+function Gallery({ blocks, library, onSelect, selected }) {
+  const [filter, setFilter] = useState('captures');
   const images = blocks.flatMap((block) => block.images.map((image) => ({ ...image, source: block.source })));
-  return <div className="galleryGrid">{images.map((image) => <button key={image.id} className={`photoCard ${selected === image.id ? 'selected' : ''}`} onClick={() => onSelect(image)}>
-    <img src={image.url} alt="Portrait" loading="lazy" />
-    <span className="chips">{image.tags?.slice(0, 2).map((tag) => <em key={tag.id}>{tag.name.replace('portrait:', '')}</em>)}</span>
-  </button>)}</div>;
+  const tagged = (image, name) => image.tags?.some((tag) => tag.name === name);
+  const captures = images.filter((image) => tagged(image, 'portrait:capture'));
+  const visible = filter === 'all' ? images : filter === 'unnamed' ? captures.filter((image) => tagged(image, 'portrait:unknown')) : captures;
+  const collectionCount = new Set(captures.flatMap((image) => image.tags?.map((tag) => tag.name.startsWith('portrait:collection:') ? tag.name : null).filter(Boolean) || [])).size;
+  return <div className="captureGallery">
+    <div className="galleryToolbar"><div><strong>{captures.length} captured photo{captures.length === 1 ? '' : 's'}</strong><small>{collectionCount || library.unknown_clusters?.length || 0} people collection{collectionCount === 1 ? '' : 's'} · updates automatically</small></div><div className="galleryFilters">{[['captures', 'Captured'], ['unnamed', 'Needs names'], ['all', 'All photos']].map(([id, label]) => <button key={id} className={filter === id ? 'active' : ''} onClick={() => setFilter(id)}>{label}</button>)}</div></div>
+    {visible.length ? <div className="galleryGrid">{visible.map((image) => <button key={image.id} className={`photoCard ${selected === image.id ? 'selected' : ''}`} onClick={() => onSelect(image)}>
+      <img src={`${image.url}?v=${image.id}`} alt="Captured portrait" loading="lazy" />
+      <span className="chips"><em>{tagged(image, 'portrait:unknown') ? 'Needs a name' : tagged(image, 'portrait:generated') ? 'Generated' : 'Captured'}</em></span>
+    </button>)}</div> : <div className="galleryEmpty"><strong>No photos in this view yet.</strong><span>Accepted camera captures will appear here automatically.</span></div>}
+  </div>;
 }
 
 function PeoplePanel({ library, selectedImage, reload, toast }) {
@@ -181,6 +191,7 @@ export default function App() {
   const toast = useCallback((message) => { setNotice(message); setTimeout(() => setNotice(''), 5000); }, []);
   const reload = useCallback(async () => { try { const [s, l] = await Promise.all([api('/status'), api('/library')]); setStatus(s); setLibrary(l); if (s.gallery_configured) setBlocks((await api('/gallery')).blocks); } catch (e) { toast(e.message); } }, [toast]);
   useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { if (view !== 'people') return undefined; const id = setInterval(reload, 5000); return () => clearInterval(id); }, [view, reload]);
   const displayImages = useMemo(() => blocks.flatMap((b) => b.images).filter((img) => img.tags?.some((tag) => ['portrait:generated', 'portrait:display-ready'].includes(tag.name))), [blocks]);
   const [slide, setSlide] = useState(0);
   useEffect(() => { const id = setInterval(() => setSlide((n) => displayImages.length ? (n + 1) % displayImages.length : 0), 18000); return () => clearInterval(id); }, [displayImages.length]);
@@ -188,7 +199,7 @@ export default function App() {
     <nav><button className="brand" onClick={() => setView('frame')}><Icon>✦</Icon><span>AI Portrait<small>LIVING MEMORIES</small></span></button><div className="navTabs">{[['frame','Photo frame'],['camera','Camera'],['people','People'],['create','Create']].map(([id,label]) => <button key={id} className={view === id ? 'active' : ''} onClick={() => setView(id)}>{label}</button>)}</div><button className="settings" onClick={() => setView('people')}>⚙</button></nav>
     {view === 'frame' && <section className="frameView">{displayImages.length ? <><img src={displayImages[slide]?.url} /><div className="frameGradient" /><div className="frameCaption"><span>PORTRAIT OF THE MOMENT</span><strong>A memory that never happened.<br />But should have.</strong></div><div className="dots">{displayImages.map((_, i) => <i className={i === slide ? 'on' : ''} key={i} />)}</div></> : <div className="emptyFrame"><Icon>✦</Icon><h1>Your photo frame is ready.</h1><p>Meet a few people through the camera and create the first impossible memory.</p><button onClick={() => setView('camera')}>Open camera</button></div>}</section>}
     <div className={view === 'camera' ? '' : 'cameraBackground'}><CameraView interval={status.capture_interval_seconds} captureReady={status.capture_ready} captureBlocker={status.capture_blocker} toast={toast} onCaptured={(result) => { reload(); if (view === 'frame' && result.photo_ids?.length) { setView('camera'); setTimeout(() => setView((current) => current === 'camera' ? 'frame' : current), 9500); } if (!result.person && result.saved) toast('New person found — open People to give them a name.'); }} /></div>
-    {view === 'people' && <section className="workspace"><div className="sectionHead"><span className="eyebrow">GALLERY & IDENTITY</span><h2>The people behind the stories</h2><p>Select a capture, name the person, and teach relationships. Nothing is published without your configuration.</p></div><div className="split"><div><Gallery blocks={blocks} selected={selectedImage?.id} onSelect={setSelectedImage} /></div><PeoplePanel library={library} selectedImage={selectedImage} reload={reload} toast={toast} /></div></section>}
+    {view === 'people' && <section className="workspace"><div className="sectionHead"><span className="eyebrow">GALLERY & IDENTITY</span><h2>The people behind the stories</h2><p>Every accepted ambient capture appears here. Select one to name the person and teach relationships.</p></div><div className="split"><div><Gallery blocks={blocks} library={library} selected={selectedImage?.id} onSelect={setSelectedImage} /></div><PeoplePanel library={library} selectedImage={selectedImage} reload={reload} toast={toast} /></div></section>}
     {view === 'create' && <CreatePanel library={library} toast={toast} onGenerated={() => { reload(); toast('New portrait created and added to the photo frame.'); }} />}
     {notice && <div className="toast">{notice}</div>}
   </main>;

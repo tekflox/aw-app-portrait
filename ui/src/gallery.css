@@ -1,0 +1,72 @@
+.captureGallery {
+  display: grid;
+  gap: 16px;
+}
+
+.galleryToolbar {
+  align-items: flex-end;
+  border-bottom: 1px solid #cfc8ba;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding-bottom: 13px;
+}
+
+.galleryToolbar strong,
+.galleryToolbar small {
+  display: block;
+}
+
+.galleryToolbar small {
+  color: #756f64;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.galleryFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.galleryFilters button {
+  background: transparent;
+  border: 1px solid #cfc8ba;
+  border-radius: 20px;
+  color: #655f56;
+  font-size: 11px;
+  padding: 7px 10px;
+}
+
+.galleryFilters button.active {
+  background: #211e19;
+  border-color: #211e19;
+  color: #fff;
+}
+
+.galleryEmpty {
+  border: 1px dashed #bdb5a7;
+  color: #6f695f;
+  display: grid;
+  min-height: 260px;
+  padding: 24px;
+  place-content: center;
+  text-align: center;
+}
+
+.galleryEmpty strong,
+.galleryEmpty span {
+  display: block;
+}
+
+.galleryEmpty span {
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+@media (max-width: 800px) {
+  .galleryToolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

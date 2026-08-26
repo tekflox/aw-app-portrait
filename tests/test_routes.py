@@ -4,12 +4,30 @@ import sys
 from pathlib import Path
 
 import httpx
+import cv2
+import numpy as np
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from portrait_app.routes import build_routes  # noqa: E402
+from portrait_app.routes import build_routes, prepare_portrait  # noqa: E402
+
+
+def test_browser_face_box_is_verified_when_frontal_cascade_misses(monkeypatch):
+    image = np.full((720, 1280, 3), 150, dtype=np.uint8)
+    image[:, ::8] = 100
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+
+    class EmptyCascade:
+        def detectMultiScale(self, *args, **kwargs):
+            return []
+
+    monkeypatch.setattr(cv2, "CascadeClassifier", lambda *_: EmptyCascade())
+    cropped, analysis = prepare_portrait(encoded.tobytes(), [0.35, 0.18, 0.3, 0.35])
+    assert cropped
+    assert analysis["detector"] == "mediapipe-verified"
 
 
 def test_trusted_runner_identity_initializes_gallery_automatically(tmp_path, monkeypatch):

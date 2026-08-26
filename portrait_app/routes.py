@@ -20,7 +20,7 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 UI_DIST = APP_ROOT / "ui" / "dist"
 
 
-def prepare_portrait(content: bytes) -> tuple[bytes, dict]:
+def prepare_portrait(content: bytes, claimed_face_box: list[float] | None = None) -> tuple[bytes, dict]:
     """Validate a face server-side and return a vertical, body-aware crop."""
     frame = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
@@ -33,13 +33,24 @@ def prepare_portrait(content: bytes) -> tuple[bytes, dict]:
     sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     if brightness < 35:
         raise HTTPException(422, "The room is too dark")
-    if sharpness < 32:
+    if sharpness < 18:
         raise HTTPException(422, "Hold still — the image is blurred")
     cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    faces = cascade.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=5, minSize=(70, 70))
-    if not len(faces):
+    faces = cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=4, minSize=(55, 55))
+    detector = "opencv"
+    if len(faces):
+        x, y, face_w, face_h = max(faces, key=lambda face: face[2] * face[3])
+    elif claimed_face_box and len(claimed_face_box) == 4:
+        values = [float(value) for value in claimed_face_box]
+        if max(values) <= 1.01:
+            values = [values[0] * width, values[1] * height, values[2] * width, values[3] * height]
+        x, y, face_w, face_h = [int(value) for value in values]
+        valid = x >= 0 and y >= 0 and face_w > 0 and face_h > 0 and x + face_w <= width and y + face_h <= height
+        if not valid:
+            raise HTTPException(422, "The detected face position is invalid")
+        detector = "mediapipe-verified"
+    else:
         raise HTTPException(422, "No clear face was found")
-    x, y, face_w, face_h = max(faces, key=lambda face: face[2] * face[3])
     if face_w * face_h < width * height * 0.012:
         raise HTTPException(422, "Move closer — the face is too small")
 
@@ -62,6 +73,7 @@ def prepare_portrait(content: bytes) -> tuple[bytes, dict]:
         "crop_box": [int(left), int(crop_top), int(right - left), int(crop_bottom - crop_top)],
         "brightness": round(brightness, 1),
         "sharpness": round(sharpness, 1),
+        "detector": detector,
     }
 
 
@@ -229,6 +241,7 @@ def build_routes(
     async def capture(
         photo: UploadFile = File(...),
         descriptor_json: str = Form("[]"),
+        face_box_json: str = Form("[]"),
         quality: float = Form(0),
     ) -> dict:
         if quality < 0.42:
@@ -237,10 +250,14 @@ def build_routes(
             descriptor = [float(v) for v in json.loads(descriptor_json)][:256]
         except (ValueError, TypeError, json.JSONDecodeError):
             raise HTTPException(400, "Invalid face descriptor")
+        try:
+            face_box = [float(v) for v in json.loads(face_box_json)][:4]
+        except (ValueError, TypeError, json.JSONDecodeError):
+            raise HTTPException(400, "Invalid face position")
         content = await photo.read()
         if not content or len(content) > 12 * 1024 * 1024:
             raise HTTPException(400, "Photo must be between 1 byte and 12 MB")
-        cropped, analysis = prepare_portrait(content)
+        cropped, analysis = prepare_portrait(content, face_box)
         existing = state.collection_for(descriptor)
         if len(existing["photo_ids"]) >= 10:
             return {
