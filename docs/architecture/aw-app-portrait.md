@@ -1,23 +1,25 @@
-# AI Portrait architecture
+---
+repo: architecture
+path: docs/architecture/aw-app-portrait.md
+source: generated
+edited: false
+checksum: sha256:2fded12b472e6502cecc40df29221881e736289ba72f647255ffaf00ce96eb1b
+---
+# AI Portrait
 
 - **repo**: aw-app-portrait
 - **layer**: app
-- **technologies**: Python, FastAPI, React, browser MediaDevices
+- **technologies**: python, react
+- **health** (derived): planned
 
-AI Portrait is a Tier-1 managed web app. `portrait_app/routes.py` exposes the app API and serves `ui/dist`; `portrait_app/state.py` persists people, relations, non-biometric MVP descriptors, and generation history under the app's durable workspace data directory.
+Turn a tablet into a living AI photo frame: meet the people in front of its camera, organize their portraits, and place friends and family in delightful new scenes.
 
 ## Connections
+- `http` → **aw-workspace** — routes mounted at /api/apps/aw-app-portrait
+- `other` → **aw-app-agents-platform-runners** — Provides the shared multitenant gallery and future agent-driven generation workflows
 
-- `http` → **aw-workspace** — mounted at `/api/apps/aw-app-portrait` and on the per-app subdomain.
-- `http` → **agents-platform-multitenant** — gallery blocks, image upload/download, and tags.
-- `http` → **OpenAI Images API** — optional reference-image generation.
+## MCP tools
+_none exposed_
 
 ## Requirements
-
-- Stable presence and a roughly frontal look trigger candidate capture; no motion gesture or intentional shutter action is required.
-- OpenCV independently validates the face, brightness, and sharpness on the server and uploads only a body-aware portrait crop.
-- Each named or provisional identity collection is capped at ten approved samples.
-- All gallery tags owned by the app use `portrait:` or `person:` namespaces.
-- Unknown people require human naming; low-confidence matching never invents a name.
-- Generated images retain participant tags and `portrait:generated`.
-- Camera pixels are not streamed continuously to the backend.
+_none documented_
