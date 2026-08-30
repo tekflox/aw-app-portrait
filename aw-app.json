@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "id": "aw-app-portrait",
   "name": "AI Portrait",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Turn a tablet into a living AI photo frame: meet the people in front of its camera, organize their portraits, and place friends and family in delightful new scenes.",
   "tier": "inprocess",
   "requires_ui_refresh": true,
